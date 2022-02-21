@@ -93,10 +93,10 @@ public class TopkCommonWords {
         String valStr = val.toString();
         switch (valStr.charAt(0)) {
           case 'a':
-            sumA += Integer.valueOf(val.toString().substring(1));
+            sumA += Integer.valueOf(valStr.substring(1));
             break;
           case 'b':
-            sumB += Integer.valueOf(val.toString().substring(1));
+            sumB += Integer.valueOf(valStr.substring(1));
             break;
           default:
             System.err.println("Error K-V: " + word.toString() + ": " + valStr);
@@ -113,11 +113,20 @@ public class TopkCommonWords {
       extends Reducer<Text, Text, Text, Text> {
     public void reduce(Text dummyKey, Iterable<Text> results,
         Context context) throws IOException, InterruptedException {
+      HashSet<String> toIgnoreSet = new HashSet<>();
       TreeMap<Integer, PriorityQueue<String>> map = new TreeMap<>((a, b) -> b - a);
+
       for (Text res : results) {
         String[] tokens = res.toString().split(" ", 2);
         String word = tokens[0];
         int count = Integer.valueOf(tokens[1]);
+
+        if (toIgnoreSet.contains(word)) {
+          toIgnoreSet.remove(word);
+        } else {
+          toIgnoreSet.add(word);
+        }
+
         if (map.containsKey(count)) {
           PriorityQueue<String> pq = map.get(count);
           pq.add(word);
@@ -128,11 +137,21 @@ public class TopkCommonWords {
           map.put(count, pq);
         }
       }
+
+      int wordsPrinted = 0;
       while (!map.isEmpty()) {
         Map.Entry<Integer, PriorityQueue<String>> entry = map.pollFirstEntry();
         Text entryCount = new Text(entry.getKey().toString());
         for (String word : entry.getValue()) {
-          context.write(new Text(word), entryCount);
+          if (wordsPrinted == 20) { // print only top 20
+            return;
+          }
+
+          if (!toIgnoreSet.contains(word)) {
+            context.write(entryCount, new Text(word));
+            toIgnoreSet.add(word);
+            ++wordsPrinted;
+          }
         }
       }
     }
