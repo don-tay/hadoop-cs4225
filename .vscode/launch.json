@@ -6,6 +6,14 @@
   "configurations": [
     {
       "type": "java",
+      "name": "Launch TopkCommonWords",
+      "request": "launch",
+      "mainClass": "org.example.TopkCommonWords",
+      "projectName": "wordcount",
+      "args": "input/task1-input1.txt input/task1-input2.txt input/stopwords.txt output & rm -rf output"
+    },
+    {
+      "type": "java",
       "name": "Launch Current File",
       "request": "launch",
       "mainClass": "${file}"
