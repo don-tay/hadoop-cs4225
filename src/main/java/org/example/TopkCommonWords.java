@@ -1,12 +1,14 @@
 package org.example;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.IOException;
+import java.net.URI;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.StringTokenizer;
-
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -18,48 +20,65 @@ import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.FileSplit;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.util.GenericOptionsParser;
+import org.apache.hadoop.util.StringUtils;
 
 public class TopkCommonWords {
-  public static final Log log = LogFactory.getLog(TopkCommonWords.class);
 
   public static class TokenizerMapper
       extends Mapper<Object, Text, Text, Text> {
     private Text word = new Text();
     private Text val = new Text();
 
+    private Set<String> stopwords = new HashSet<>();
+
+    private Configuration conf;
+    private BufferedReader fis;
+
+    @Override
+    public void setup(Context context) throws IOException,
+        InterruptedException {
+      conf = context.getConfiguration();
+      URI stopwordsURI = Job.getInstance(conf).getCacheFiles()[0];
+      Path stopwordsPath = new Path(stopwordsURI.getPath());
+      String stopwordsFileName = stopwordsPath.getName().toString();
+      parseSkipFile(stopwordsFileName);
+    }
+
+    private void parseSkipFile(String fileName) {
+      try {
+        fis = new BufferedReader(new FileReader(fileName));
+        String stopword = null;
+        while ((stopword = fis.readLine()) != null) {
+          stopwords.add(stopword);
+        }
+      } catch (IOException ioe) {
+        System.err.println("Error parsing cached file " + StringUtils.stringifyException(ioe));
+      }
+    }
+
     public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
       HashMap<String, Integer> hash = new HashMap<>();
       String fileName = ((FileSplit) context.getInputSplit()).getPath().getName();
-      StringTokenizer itr = new StringTokenizer(value.toString());
+      if (fileName != "task1-input1.txt" || fileName != "task1-input2.txt") {
+        throw new IOException("Invalid file name: " + fileName);
+      }
+      String line = value.toString();
+      for (String stopword : stopwords) {
+        line = line.replaceAll(stopword, "");
+      }
+      StringTokenizer itr = new StringTokenizer(line);
       while (itr.hasMoreTokens()) {
         String tok = itr.nextToken();
-        switch (fileName) {
-          case "task1-input1.txt":
-          case "task1-input2.txt":
-            log.debug("token: " + tok);
-            hash.merge(tok, 1, (a, b) -> a + b);
-            break;
-          case "stopwords.txt":
-            // write through
-            word.set(tok);
-            val.set("C");
-            context.write(word, val);
-            break;
-          default:
-            throw new IOException("Invalid file name: " + fileName);
-        }
+        hash.merge(tok, 1, (a, b) -> a + b);
       }
 
-      // write combined results for inputs
-      if (fileName.equals("task1-input1.txt") || fileName.equals("task1-input2.txt")) {
-        String prefix = fileName.equals("task1-input1.txt") ? "A" : "B";
+      String prefix = fileName.equals("task1-input1.txt") ? "A" : "B";
 
-        for (Map.Entry<String, Integer> elem : hash.entrySet()) {
-          word.set(elem.getKey());
-          val.set(prefix + elem.getValue().toString());
-          log.debug(elem.getKey() + ": " + (prefix + elem.getValue().toString()));
-          context.write(word, val);
-        }
+      for (Map.Entry<String, Integer> elem : hash.entrySet()) {
+        word.set(elem.getKey());
+        val.set(prefix + elem.getValue().toString());
+        context.write(word, val);
       }
     }
   }
@@ -73,29 +92,34 @@ public class TopkCommonWords {
       boolean ignoreKey = false;
       int sumA = 0;
       int sumB = 0;
+
       for (Text val : values) {
         String str = val.toString();
+        System.out.println(key + ": " + str);
         switch (str.charAt(0)) {
           case 'A':
             sumA += Integer.valueOf(val.toString().substring(1));
+            break;
           case 'B':
             sumB += Integer.valueOf(val.toString().substring(1));
-          case 'C':
-            ignoreKey = true;
-
+            break;
+          default:
+            System.err.println("Error string: " + str);
         }
       }
 
       result.set(Math.max(sumA, sumB));
-
       if (!ignoreKey) {
         context.write(key, result);
       }
     }
+
   }
 
   public static void main(String[] args) throws Exception {
     Configuration conf = new Configuration();
+    GenericOptionsParser optionParser = new GenericOptionsParser(conf, args);
+    String[] remainingArgs = optionParser.getRemainingArgs();
     Job job = Job.getInstance(conf, "top k common words");
     job.setJarByClass(TopkCommonWords.class);
     job.setMapperClass(TokenizerMapper.class);
@@ -107,10 +131,11 @@ public class TopkCommonWords {
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(IntWritable.class);
 
-    FileInputFormat.setInputPaths(job, new Path(args[0]),
-        new Path(args[1]),
-        new Path(args[2]));
-    FileOutputFormat.setOutputPath(job, new Path(args[3]));
+    job.addCacheFile(new Path(remainingArgs[2]).toUri());
+
+    FileInputFormat.setInputPaths(job, new Path(remainingArgs[0]),
+        new Path(remainingArgs[1]));
+    FileOutputFormat.setOutputPath(job, new Path(remainingArgs[3]));
     System.exit(job.waitForCompletion(true) ? 0 : 1);
   }
 }
