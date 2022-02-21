@@ -12,7 +12,6 @@ import java.util.StringTokenizer;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
@@ -27,8 +26,6 @@ public class TopkCommonWords {
 
   public static class TokenizerMapper
       extends Mapper<Object, Text, Text, Text> {
-    private Text word = new Text();
-    private Text val = new Text();
 
     private Set<String> stopwords = new HashSet<>();
 
@@ -58,60 +55,56 @@ public class TopkCommonWords {
     }
 
     public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
+      Text word = new Text();
+      Text val = new Text();
       HashMap<String, Integer> hash = new HashMap<>();
       String fileName = ((FileSplit) context.getInputSplit()).getPath().getName();
-      if (fileName != "task1-input1.txt" || fileName != "task1-input2.txt") {
-        throw new IOException("Invalid file name: " + fileName);
-      }
       String line = value.toString();
-      for (String stopword : stopwords) {
-        line = line.replaceAll(stopword, "");
-      }
       StringTokenizer itr = new StringTokenizer(line);
       while (itr.hasMoreTokens()) {
         String tok = itr.nextToken();
         hash.merge(tok, 1, (a, b) -> a + b);
       }
 
-      String prefix = fileName.equals("task1-input1.txt") ? "A" : "B";
-
       for (Map.Entry<String, Integer> elem : hash.entrySet()) {
+        if (stopwords.contains(elem.getKey())) {
+          continue;
+        }
+        String finalVal = fileName.equals("task1-input1.txt") ? "a" + elem.getValue().toString()
+            : "b" + elem.getValue().toString();
+
         word.set(elem.getKey());
-        val.set(prefix + elem.getValue().toString());
+        val.set(finalVal);
         context.write(word, val);
       }
     }
   }
 
   public static class IntSumReducer
-      extends Reducer<Text, Text, Text, IntWritable> {
-    private IntWritable result = new IntWritable();
+      extends Reducer<Text, Text, Text, Text> {
+    private Text result = new Text();
 
     public void reduce(Text key, Iterable<Text> values,
         Context context) throws IOException, InterruptedException {
-      boolean ignoreKey = false;
       int sumA = 0;
       int sumB = 0;
 
       for (Text val : values) {
-        String str = val.toString();
-        System.out.println(key + ": " + str);
-        switch (str.charAt(0)) {
-          case 'A':
+        String valStr = val.toString();
+        switch (valStr.charAt(0)) {
+          case 'a':
             sumA += Integer.valueOf(val.toString().substring(1));
             break;
-          case 'B':
+          case 'b':
             sumB += Integer.valueOf(val.toString().substring(1));
             break;
           default:
-            System.err.println("Error string: " + str);
+            System.err.println("Error K-V: " + key.toString() + ": " + valStr);
         }
       }
 
-      result.set(Math.max(sumA, sumB));
-      if (!ignoreKey) {
-        context.write(key, result);
-      }
+      result.set(Integer.valueOf(Math.max(sumA, sumB)).toString());
+      context.write(key, result);
     }
 
   }
@@ -126,10 +119,8 @@ public class TopkCommonWords {
     job.setCombinerClass(IntSumReducer.class);
     job.setReducerClass(IntSumReducer.class);
 
-    job.setMapOutputKeyClass(Text.class);
-    job.setMapOutputValueClass(Text.class);
     job.setOutputKeyClass(Text.class);
-    job.setOutputValueClass(IntWritable.class);
+    job.setOutputValueClass(Text.class);
 
     job.addCacheFile(new Path(remainingArgs[2]).toUri());
 
