@@ -23,7 +23,7 @@
       "request": "launch",
       "mainClass": "org.example.WordCount",
       "projectName": "wordcount",
-      "args": "input output"
+      "args": "input output & rm -rf output"
     }
   ]
 }
