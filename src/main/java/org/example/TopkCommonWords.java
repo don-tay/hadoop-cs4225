@@ -7,8 +7,10 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.StringTokenizer;
+import java.util.TreeMap;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -80,16 +82,14 @@ public class TopkCommonWords {
     }
   }
 
-  public static class IntSumReducer
+  public static class CommonWordsCombiner
       extends Reducer<Text, Text, Text, Text> {
-    private Text result = new Text();
-
-    public void reduce(Text key, Iterable<Text> values,
+    public void reduce(Text word, Iterable<Text> counts,
         Context context) throws IOException, InterruptedException {
       int sumA = 0;
       int sumB = 0;
 
-      for (Text val : values) {
+      for (Text val : counts) {
         String valStr = val.toString();
         switch (valStr.charAt(0)) {
           case 'a':
@@ -99,14 +99,43 @@ public class TopkCommonWords {
             sumB += Integer.valueOf(val.toString().substring(1));
             break;
           default:
-            System.err.println("Error K-V: " + key.toString() + ": " + valStr);
+            System.err.println("Error K-V: " + word.toString() + ": " + valStr);
         }
       }
 
-      result.set(Integer.valueOf(Math.max(sumA, sumB)).toString());
-      context.write(key, result);
+      Text result = new Text(word.toString() + " " + Math.max(sumA, sumB));
+      context.write(new Text("a"), result);
     }
 
+  }
+
+  public static class SortedTopCommonWordsReducer
+      extends Reducer<Text, Text, Text, Text> {
+    public void reduce(Text dummyKey, Iterable<Text> results,
+        Context context) throws IOException, InterruptedException {
+      TreeMap<Integer, PriorityQueue<String>> map = new TreeMap<>((a, b) -> b - a);
+      for (Text res : results) {
+        String[] tokens = res.toString().split(" ", 2);
+        String word = tokens[0];
+        int count = Integer.valueOf(tokens[1]);
+        if (map.containsKey(count)) {
+          PriorityQueue<String> pq = map.get(count);
+          pq.add(word);
+          map.put(count, pq);
+        } else {
+          PriorityQueue<String> pq = new PriorityQueue<>((a, b) -> b.compareTo(a));
+          pq.add(word);
+          map.put(count, pq);
+        }
+      }
+      while (!map.isEmpty()) {
+        Map.Entry<Integer, PriorityQueue<String>> entry = map.pollFirstEntry();
+        Text entryCount = new Text(entry.getKey().toString());
+        for (String word : entry.getValue()) {
+          context.write(new Text(word), entryCount);
+        }
+      }
+    }
   }
 
   public static void main(String[] args) throws Exception {
@@ -116,8 +145,8 @@ public class TopkCommonWords {
     Job job = Job.getInstance(conf, "top k common words");
     job.setJarByClass(TopkCommonWords.class);
     job.setMapperClass(TokenizerMapper.class);
-    job.setCombinerClass(IntSumReducer.class);
-    job.setReducerClass(IntSumReducer.class);
+    job.setCombinerClass(CommonWordsCombiner.class);
+    job.setReducerClass(SortedTopCommonWordsReducer.class);
 
     job.setOutputKeyClass(Text.class);
     job.setOutputValueClass(Text.class);
