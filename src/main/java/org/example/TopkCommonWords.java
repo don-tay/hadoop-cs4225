@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
 import java.net.URI;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -60,7 +61,6 @@ public class TopkCommonWords {
       Text word = new Text();
       Text val = new Text();
       HashMap<String, Integer> hash = new HashMap<>();
-      String fileName = ((FileSplit) context.getInputSplit()).getPath().getName();
       String line = value.toString();
       StringTokenizer itr = new StringTokenizer(line);
       while (itr.hasMoreTokens()) {
@@ -72,9 +72,7 @@ public class TopkCommonWords {
         if (stopwords.contains(elem.getKey())) {
           continue;
         }
-        String finalVal = fileName.equals("task1-input1.txt") ? "a" + elem.getValue().toString()
-            : "b" + elem.getValue().toString();
-
+        String finalVal = elem.getValue().toString();
         word.set(elem.getKey());
         val.set(finalVal);
         context.write(word, val);
@@ -86,24 +84,12 @@ public class TopkCommonWords {
       extends Reducer<Text, Text, Text, Text> {
     public void reduce(Text word, Iterable<Text> counts,
         Context context) throws IOException, InterruptedException {
-      int sumA = 0;
-      int sumB = 0;
-
+      int sum = 0;
       for (Text val : counts) {
         String valStr = val.toString();
-        switch (valStr.charAt(0)) {
-          case 'a':
-            sumA += Integer.valueOf(valStr.substring(1));
-            break;
-          case 'b':
-            sumB += Integer.valueOf(valStr.substring(1));
-            break;
-          default:
-            System.err.println("Error K-V: " + word.toString() + ": " + valStr);
-        }
+        sum += Integer.valueOf(valStr);
       }
-
-      Text result = new Text(word.toString() + " " + Math.max(sumA, sumB));
+      Text result = new Text(word.toString() + " " + sum);
       context.write(new Text("a"), result);
     }
 
@@ -113,13 +99,18 @@ public class TopkCommonWords {
       extends Reducer<Text, Text, Text, Text> {
     public void reduce(Text dummyKey, Iterable<Text> results,
         Context context) throws IOException, InterruptedException {
+      HashMap<String, Integer> largerWordCountMap = new HashMap<>();
       HashSet<String> toIgnoreSet = new HashSet<>();
-      TreeMap<Integer, PriorityQueue<String>> map = new TreeMap<>((a, b) -> b - a);
 
+      // build set to ignore words (ie. appear only once, not common in both files
+      // and build map to get the larger frequency of the respective word between the
+      // 2 files)
       for (Text res : results) {
         String[] tokens = res.toString().split(" ", 2);
         String word = tokens[0];
         int count = Integer.valueOf(tokens[1]);
+
+        largerWordCountMap.merge(word, count, (a, b) -> Math.max(a, b));
 
         if (toIgnoreSet.contains(word)) {
           toIgnoreSet.remove(word);
@@ -127,29 +118,36 @@ public class TopkCommonWords {
           toIgnoreSet.add(word);
         }
 
+      }
+
+      // build treemap to order by word frequency
+      TreeMap<Integer, PriorityQueue<String>> map = new TreeMap<>((a, b) -> b - a);
+      for (String word : largerWordCountMap.keySet()) {
+        int count = largerWordCountMap.get(word);
         if (map.containsKey(count)) {
           PriorityQueue<String> pq = map.get(count);
           pq.add(word);
           map.put(count, pq);
         } else {
-          PriorityQueue<String> pq = new PriorityQueue<>((a, b) -> b.compareTo(a));
+          PriorityQueue<String> pq = new PriorityQueue<>(Comparator.reverseOrder());
           pq.add(word);
           map.put(count, pq);
         }
       }
 
+      // print words
       int wordsPrinted = 0;
       while (!map.isEmpty()) {
         Map.Entry<Integer, PriorityQueue<String>> entry = map.pollFirstEntry();
         Text entryCount = new Text(entry.getKey().toString());
-        for (String word : entry.getValue()) {
+        while (!(entry.getValue()).isEmpty()) {
+          String word = entry.getValue().poll();
           if (wordsPrinted == 20) { // print only top 20
             return;
           }
 
           if (!toIgnoreSet.contains(word)) {
             context.write(entryCount, new Text(word));
-            toIgnoreSet.add(word);
             ++wordsPrinted;
           }
         }
