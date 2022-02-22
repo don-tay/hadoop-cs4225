@@ -1,1 +1,0 @@
-/tmp/hadoop-dontay/mapred/local/job_local1062138819_0001_fb4963f9-d4e0-4cf1-ac5d-1e1f45d68f38/stopwords.txt

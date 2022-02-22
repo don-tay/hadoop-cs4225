@@ -27,5 +27,7 @@
 hs_err_pid*
 replay_pid*
 
-input
 output
+
+# OS
+.DS_Store
